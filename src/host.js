@@ -120,6 +120,12 @@ export class Host {
     await entersState(this.player, AudioPlayerStatus.Idle, 5 * 60_000);
   }
 
+  /** Best-effort short reaction clip; skipped if this host is (about to be) speaking. */
+  async interject(mp3Buffer) {
+    if (!this.player || this.player.state.status !== AudioPlayerStatus.Idle) return;
+    await this.speak(mp3Buffer);
+  }
+
   async post(channelId, content) {
     if (!channelId || !content) return;
     try {

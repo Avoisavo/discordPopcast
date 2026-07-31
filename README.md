@@ -38,12 +38,24 @@ npm install
 npm start
 ```
 
-Both bots log in, join the voice channel, and start talking. To keep it running 24/7 after you close the terminal:
+Both bots log in, join the voice channel, and start talking. On a laptop, prevent sleep from killing the show by starting it with `caffeinate -is npm start`. To keep it running 24/7 after you close the terminal:
 
 ```bash
 npx pm2 start src/index.js --name popcast
 npx pm2 logs popcast
 ```
+
+## Stopping the show
+
+- Started with `npm start` in a terminal → press **Ctrl+C** in that terminal.
+- Running somewhere you can't see → `pkill -f "node src/index.js"`.
+- Started with pm2 → `npx pm2 stop popcast` (or `npx pm2 delete popcast` to remove it).
+
+The bots leave the voice channel the moment the process dies.
+
+## The hosts' lives
+
+[personas/max.md](personas/max.md) and [personas/nova.md](personas/nova.md) hold each host's backstory — their friendship, running jokes, and personal history. The hosts weave these into conversation on their own. Edit the files to reshape their lives; changes apply on the next restart.
 
 ## Credit math (ElevenLabs Creator plan)
 

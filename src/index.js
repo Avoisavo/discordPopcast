@@ -78,6 +78,25 @@ async function main() {
   const voices = { A: config.elevenlabs.voiceA, B: config.elevenlabs.voiceB };
   const hosts = { A: hostA, B: hostB };
 
+  const speeds = { A: config.elevenlabs.speedA, B: config.elevenlabs.speedB };
+
+  // Short reactions the listening host drops mid-line, like a real co-host —
+  // laughs included. Each (host, phrase) pair is synthesized once, then reused.
+  const BACKCHANNELS = {
+    A: ['hahaha!', 'no way.', 'wait— [laughs]', 'bro.', 'okay okay.', "that's true."],
+    B: ['ya ya hahaha.', '[laughs]', 'hahaha cannot.', 'mm-hmm.', 'so true.', 'aiyo.'],
+  };
+  const backchannelCache = new Map();
+  async function backchannelClip(key) {
+    const pool = BACKCHANNELS[key];
+    const phrase = pool[Math.floor(Math.random() * pool.length)];
+    const cacheKey = `${key}|${phrase}`;
+    if (!backchannelCache.has(cacheKey)) {
+      backchannelCache.set(cacheKey, await speech.synthesize(phrase, voices[key], speeds[key]));
+    }
+    return backchannelCache.get(cacheKey);
+  }
+
   let speakerIndex = 0;
   let turnCount = 0;
   let consecutiveErrors = 0;
@@ -96,7 +115,7 @@ async function main() {
     speakerIndex += 1;
     let audio = null;
     try {
-      audio = await speech.synthesize(line, voices[persona.key]);
+      audio = await speech.synthesize(line, voices[persona.key], speeds[persona.key]);
     } catch (err) {
       console.warn(`[tts] ${err.message} — playing this line as text only`);
     }
@@ -118,7 +137,19 @@ async function main() {
       pending.catch(() => {}); // surfaced when awaited on the next iteration
 
       if (turn.audio) {
-        await host.speak(turn.audio);
+        const playback = host.speak(turn.audio);
+        // The listening host occasionally murmurs agreement partway through —
+        // capped well before the line's estimated end so it never collides
+        // with their own next line.
+        if (Math.random() < 0.5 && turn.line.length > 80) {
+          const partnerKey = turn.persona.key === 'A' ? 'B' : 'A';
+          const delay = 1_500 + Math.random() * Math.min(6_000, turn.line.length * 25);
+          sleep(delay)
+            .then(() => backchannelClip(partnerKey))
+            .then((clip) => (clip ? hosts[partnerKey].interject(clip) : null))
+            .catch(() => {}); // best-effort — never disturb the main line
+        }
+        await playback;
       } else {
         // Text-only mode: pause roughly as long as the line would take to read.
         await sleep(Math.min(12_000, 1_000 + turn.line.length * 45));

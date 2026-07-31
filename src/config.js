@@ -14,6 +14,11 @@ function int(value, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function num(value, fallback) {
+  const n = Number.parseFloat(value ?? '');
+  return Number.isFinite(n) ? n : fallback;
+}
+
 // Values copied verbatim from the old .env.example point at retired ElevenLabs
 // voices / stale pacing — treat them as unset so the real defaults apply.
 function envExcept(name, ...stale) {
@@ -38,13 +43,16 @@ export const config = {
   },
   openai: {
     apiKey: required('OPENAI_API_KEY'),
-    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    model: envExcept('OPENAI_MODEL', 'gpt-4o-mini') || 'gpt-5-mini',
   },
   elevenlabs: {
     apiKey: required('ELEVENLABS_API_KEY'),
     voiceA: envExcept('ELEVENLABS_VOICE_A', 'pNInz6obpnDSJ39PxFvo') || 'TX3LPaxmHKxFdv7VOQHJ',
-    voiceB: envExcept('ELEVENLABS_VOICE_B', '21m00Tcm4TlvDq8ikWAM') || 'Xb7hH8MSUJpSbSDYk0k2',
+    voiceB: envExcept('ELEVENLABS_VOICE_B', '21m00Tcm4TlvDq8ikWAM') || 'qAJVXEQ6QgjOQ25KuoU8',
     modelId: process.env.ELEVENLABS_MODEL || 'eleven_v3',
+    // Talking pace (0.7–1.2). B (Aisyah) runs naturally slower, so push harder.
+    speedA: num(process.env.ELEVENLABS_SPEED_A, 1.1),
+    speedB: num(process.env.ELEVENLABS_SPEED_B, 1.15),
   },
   show: {
     pauseBetweenTurnsMs: int(envExcept('PAUSE_BETWEEN_TURNS_MS', '4000'), 800),

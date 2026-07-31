@@ -13,7 +13,7 @@ export class Speech {
   }
 
   /** Returns an MP3 Buffer, or null when the credit quota is exhausted (text-only mode). */
-  async synthesize(text, voiceId) {
+  async synthesize(text, voiceId, speed = 1) {
     if (this.disabled) return null;
 
     const isV3 = this.modelId.startsWith('eleven_v3');
@@ -37,13 +37,13 @@ export class Speech {
             // knobs. On v2 models: lower stability + style exaggeration +
             // a slightly faster pace = livelier, less robotic delivery.
             voice_settings: isV3
-              ? { stability: 0.5 }
+              ? { stability: 0.5, speed }
               : {
                   stability: 0.4,
                   similarity_boost: 0.8,
                   style: 0.35,
                   use_speaker_boost: true,
-                  speed: 1.1,
+                  speed,
                 },
           }),
           // Hard wall-clock cap — a hung request must not stall the show loop.

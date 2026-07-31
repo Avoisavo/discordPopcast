@@ -56,8 +56,8 @@ export const config = {
   },
   show: {
     pauseBetweenTurnsMs: int(envExcept('PAUSE_BETWEEN_TURNS_MS', '4000'), 800),
-    // The playbook's segments run 5-8 minutes — give each topic room to breathe.
-    turnsPerTopic: int(envExcept('TURNS_PER_TOPIC', '10'), 16),
+    // One topic cycle = one episode (cold open → stories → wind-down → sign-off).
+    turnsPerTopic: int(envExcept('TURNS_PER_TOPIC', '10'), 40),
     maxLineChars: int(process.env.MAX_LINE_CHARS, 320),
     historyTurns: int(process.env.HISTORY_TURNS, 14),
     feeds: (process.env.NEWS_FEEDS || DEFAULT_FEEDS)

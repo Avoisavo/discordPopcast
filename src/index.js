@@ -112,7 +112,9 @@ async function main() {
     const persona = personas[speakerIndex % 2];
     const partner = personas[(speakerIndex + 1) % 2];
     const line = await convo.nextLine(persona, partner);
-    speakerIndex += 1;
+    // ~1 in 5 turns the same host keeps the mic ("wait— one more thing"),
+    // breaking the robotic strict alternation.
+    speakerIndex += Math.random() < 0.2 ? 0 : 1;
     let audio = null;
     try {
       audio = await speech.synthesize(line, voices[persona.key], speeds[persona.key]);

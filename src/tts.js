@@ -34,10 +34,12 @@ export class Speech {
             text,
             model_id: this.modelId,
             // v3 only accepts stability 0.0/0.5/1.0 and rejects the v2-era
-            // knobs. On v2 models: lower stability + style exaggeration +
+            // knobs. 0.0 = Creative: maximum emotional range (pitch swings,
+            // real laughs); bump to 0.5 if delivery gets too wild.
+            // On v2 models: lower stability + style exaggeration +
             // a slightly faster pace = livelier, less robotic delivery.
             voice_settings: isV3
-              ? { stability: 0.5, speed }
+              ? { stability: 0.0, speed }
               : {
                   stability: 0.4,
                   similarity_boost: 0.8,

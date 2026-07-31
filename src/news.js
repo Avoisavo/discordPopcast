@@ -1,4 +1,22 @@
 import Parser from 'rss-parser';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// topics.md at the project root switches the show to theme mode: RSS is
+// ignored and the show rotates these topics instead. Delete the file (or
+// empty it) to return to news mode.
+function themeTopics() {
+  try {
+    const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+    return readFileSync(join(root, 'topics.md'), 'utf8')
+      .split('\n')
+      .map((line) => line.replace(/^[-*]\s*/, '').trim())
+      .filter((line) => line && !line.startsWith('#'));
+  } catch {
+    return [];
+  }
+}
 
 const FALLBACK_TOPICS = [
   'Is streaming actually better than cable was, or did we just rebuild cable with extra steps?',
@@ -21,9 +39,15 @@ export class NewsDesk {
     this.priority = [];
     this.seen = new Set();
     this.fallbackIndex = 0;
+    this.themes = themeTopics();
+    this.themeOrder = [];
+    if (this.themes.length) {
+      console.log(`[news] Theme mode: rotating ${this.themes.length} topics from topics.md (RSS disabled)`);
+    }
   }
 
   async refresh() {
+    if (this.themes.length) return;
     for (const url of this.feeds) {
       try {
         const feed = await this.parser.parseURL(url);
@@ -55,8 +79,17 @@ export class NewsDesk {
   }
 
   next() {
-    const item = this.priority.shift() ?? this.queue.shift();
-    if (item) return item;
+    const suggested = this.priority.shift();
+    if (suggested) return suggested;
+    if (this.themes.length) {
+      // Shuffle a fresh pass whenever the previous one is exhausted.
+      if (this.themeOrder.length === 0) {
+        this.themeOrder = [...this.themes].sort(() => Math.random() - 0.5);
+      }
+      return { title: this.themeOrder.shift(), summary: '', source: 'show theme' };
+    }
+    const queued = this.queue.shift();
+    if (queued) return queued;
     const title = FALLBACK_TOPICS[this.fallbackIndex % FALLBACK_TOPICS.length];
     this.fallbackIndex += 1;
     return { title, summary: '', source: 'evergreen debate topic' };

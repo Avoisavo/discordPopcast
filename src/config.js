@@ -43,7 +43,7 @@ export const config = {
   },
   openai: {
     apiKey: required('OPENAI_API_KEY'),
-    model: envExcept('OPENAI_MODEL', 'gpt-4o-mini') || 'gpt-5-mini',
+    model: envExcept('OPENAI_MODEL', 'gpt-4o-mini') || 'gpt-5',
   },
   elevenlabs: {
     apiKey: required('ELEVENLABS_API_KEY'),
@@ -56,7 +56,8 @@ export const config = {
   },
   show: {
     pauseBetweenTurnsMs: int(envExcept('PAUSE_BETWEEN_TURNS_MS', '4000'), 800),
-    turnsPerTopic: int(process.env.TURNS_PER_TOPIC, 10),
+    // The playbook's segments run 5-8 minutes — give each topic room to breathe.
+    turnsPerTopic: int(envExcept('TURNS_PER_TOPIC', '10'), 16),
     maxLineChars: int(process.env.MAX_LINE_CHARS, 320),
     historyTurns: int(process.env.HISTORY_TURNS, 14),
     feeds: (process.env.NEWS_FEEDS || DEFAULT_FEEDS)

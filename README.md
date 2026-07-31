@@ -67,7 +67,8 @@ The bots leave the voice channel the moment the process dies.
 ## Steering the show
 
 - `!topic anything you want` in the transcript channel → jumps the queue as the next topic.
-- `NEWS_FEEDS` in `.env` → any comma-separated RSS feeds (default: BBC World, The Verge, Ars Technica, Variety).
+- [topics.md](topics.md) at the project root → **theme mode**: the show rotates these topics (in random order) and ignores RSS entirely. Edit the list to change the show's theme; delete the file to go back to news mode.
+- `NEWS_FEEDS` in `.env` → any comma-separated RSS feeds (default: BBC World, The Verge, Ars Technica, Variety). Only used when `topics.md` doesn't exist.
 - `TURNS_PER_TOPIC`, `MAX_LINE_CHARS`, `OPENAI_MODEL` → pacing, cost, and brain of the show.
 
 ## Troubleshooting

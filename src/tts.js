@@ -16,6 +16,11 @@ export class Speech {
   async synthesize(text, voiceId) {
     if (this.disabled) return null;
 
+    const isV3 = this.modelId.startsWith('eleven_v3');
+    // Audio tags like [laughs] are only rendered by v3 — older models would
+    // read them out loud, so strip them there.
+    if (!isV3) text = text.replace(/\[[^\]\n]{1,30}\]/g, ' ').replace(/\s+/g, ' ').trim();
+
     for (let attempt = 0; ; attempt++) {
       const res = await fetch(
         `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
@@ -28,7 +33,18 @@ export class Speech {
           body: JSON.stringify({
             text,
             model_id: this.modelId,
-            voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+            // v3 only accepts stability 0.0/0.5/1.0 and rejects the v2-era
+            // knobs. On v2 models: lower stability + style exaggeration +
+            // a slightly faster pace = livelier, less robotic delivery.
+            voice_settings: isV3
+              ? { stability: 0.5 }
+              : {
+                  stability: 0.4,
+                  similarity_boost: 0.8,
+                  style: 0.35,
+                  use_speaker_boost: true,
+                  speed: 1.1,
+                },
           }),
           // Hard wall-clock cap — a hung request must not stall the show loop.
           signal: AbortSignal.timeout(30_000),

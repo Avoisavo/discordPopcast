@@ -14,6 +14,13 @@ function int(value, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+// Values copied verbatim from the old .env.example point at retired ElevenLabs
+// voices / stale pacing — treat them as unset so the real defaults apply.
+function envExcept(name, ...stale) {
+  const value = process.env[name]?.trim();
+  return value && !stale.includes(value) ? value : undefined;
+}
+
 const DEFAULT_FEEDS = [
   'https://feeds.bbci.co.uk/news/world/rss.xml',
   'https://www.theverge.com/rss/index.xml',
@@ -35,12 +42,12 @@ export const config = {
   },
   elevenlabs: {
     apiKey: required('ELEVENLABS_API_KEY'),
-    voiceA: process.env.ELEVENLABS_VOICE_A || 'pNInz6obpnDSJ39PxFvo',
-    voiceB: process.env.ELEVENLABS_VOICE_B || '21m00Tcm4TlvDq8ikWAM',
-    modelId: process.env.ELEVENLABS_MODEL || 'eleven_turbo_v2_5',
+    voiceA: envExcept('ELEVENLABS_VOICE_A', 'pNInz6obpnDSJ39PxFvo') || 'TX3LPaxmHKxFdv7VOQHJ',
+    voiceB: envExcept('ELEVENLABS_VOICE_B', '21m00Tcm4TlvDq8ikWAM') || 'Xb7hH8MSUJpSbSDYk0k2',
+    modelId: process.env.ELEVENLABS_MODEL || 'eleven_v3',
   },
   show: {
-    pauseBetweenTurnsMs: int(process.env.PAUSE_BETWEEN_TURNS_MS, 4000),
+    pauseBetweenTurnsMs: int(envExcept('PAUSE_BETWEEN_TURNS_MS', '4000'), 800),
     turnsPerTopic: int(process.env.TURNS_PER_TOPIC, 10),
     maxLineChars: int(process.env.MAX_LINE_CHARS, 320),
     historyTurns: int(process.env.HISTORY_TURNS, 14),

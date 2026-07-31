@@ -27,7 +27,7 @@ RSS news feeds ──► topic queue ──► OpenAI (dialogue) ──► Eleve
 
 ## 2. API keys
 
-- **ElevenLabs**: elevenlabs.io → profile → **API Keys** → `ELEVENLABS_API_KEY`. Voice IDs come from the Voices page (defaults are Adam & Rachel).
+- **ElevenLabs**: elevenlabs.io → profile → **API Keys** → `ELEVENLABS_API_KEY`. Voice IDs come from the Voices page (defaults are Liam & Alice).
 - **OpenAI**: <https://platform.openai.com/api-keys> → Create new secret key → `OPENAI_API_KEY`.
 
 ## 3. Run it
@@ -47,8 +47,8 @@ npx pm2 logs popcast
 
 ## Credit math (ElevenLabs Creator plan)
 
-- `eleven_turbo_v2_5` costs **0.5 credits per character**. An average line here is ~200 characters ≈ 100 credits.
-- **100,000 credits ≈ ~1,000 spoken lines ≈ 4–6 hours of near-continuous talk.**
+- `eleven_multilingual_v2` (default — most natural) costs **1 credit per character**; `eleven_turbo_v2_5` costs 0.5. An average line here is ~200 characters ≈ 200 credits.
+- **100,000 credits ≈ ~500 spoken lines ≈ 2–3 hours of near-continuous talk** (double that on turbo).
 - To stretch a month of credits across the whole month, raise `PAUSE_BETWEEN_TURNS_MS` (e.g. `45000` ≈ one exchange per minute ≈ ~3.5k lines/month… tune to taste). Since you want to burn them: the default `4000` will happily do that.
 - When credits run out, the show **automatically continues text-only** in the transcript channel and re-checks your quota every 30 minutes.
 

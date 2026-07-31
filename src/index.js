@@ -8,6 +8,23 @@ import { Host } from './host.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Discord's voice handshake intermittently exceeds the 30s Ready window even
+// when nothing is misconfigured — retry a few times before giving up.
+async function joinWithRetry(host, attempts = 4) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await host.joinVoice(config.discord.guildId, config.discord.voiceChannelId);
+      return;
+    } catch (err) {
+      if (attempt >= attempts) throw err;
+      console.warn(
+        `[voice] ${host.persona.name} initial join failed (${err.message}) — retrying (${attempt}/${attempts})`,
+      );
+      await sleep(3_000);
+    }
+  }
+}
+
 const [personaA, personaB] = personas;
 const hostA = new Host(personaA, config.discord.tokenA, { withMessageContent: true });
 const hostB = new Host(personaB, config.discord.tokenB);
@@ -33,8 +50,8 @@ async function main() {
   const convo = new Conversation(config.openai, config.show);
 
   await Promise.all([hostA.login(), hostB.login()]);
-  await hostA.joinVoice(config.discord.guildId, config.discord.voiceChannelId);
-  await hostB.joinVoice(config.discord.guildId, config.discord.voiceChannelId);
+  await joinWithRetry(hostA);
+  await joinWithRetry(hostB);
 
   // Listeners can steer the show: !topic <anything> (handled by bot A only).
   hostA.client.on(Events.MessageCreate, async (message) => {
@@ -65,37 +82,48 @@ async function main() {
   let turnCount = 0;
   let consecutiveErrors = 0;
 
+  // Generates the next line and its audio. Runs while the previous line is
+  // still playing, so the next speaker starts with no dead air between turns.
+  async function produceTurn() {
+    if (!convo.topic || convo.turnsOnTopic >= config.show.turnsPerTopic) {
+      const topic = news.next();
+      convo.setTopic(topic);
+      console.log(`[show] New topic: ${topic.title} (${topic.source})`);
+    }
+    const persona = personas[speakerIndex % 2];
+    const partner = personas[(speakerIndex + 1) % 2];
+    const line = await convo.nextLine(persona, partner);
+    speakerIndex += 1;
+    let audio = null;
+    try {
+      audio = await speech.synthesize(line, voices[persona.key]);
+    } catch (err) {
+      console.warn(`[tts] ${err.message} — playing this line as text only`);
+    }
+    return { persona, line, audio };
+  }
+
+  let pending = null;
   for (;;) {
     try {
-      if (!convo.topic || convo.turnsOnTopic >= config.show.turnsPerTopic) {
-        const topic = news.next();
-        convo.setTopic(topic);
-        console.log(`[show] New topic: ${topic.title} (${topic.source})`);
-      }
+      const turn = await (pending ?? produceTurn());
+      const host = hosts[turn.persona.key];
+      console.log(`[show] ${turn.persona.name}: ${turn.line}`);
+      // Audio tags are for the TTS engine; keep the transcript readable.
+      const readable = turn.line.replace(/\[[^\]\n]{1,30}\]/g, ' ').replace(/\s+/g, ' ').trim();
+      await host.post(config.discord.textChannelId, readable);
 
-      const persona = personas[speakerIndex % 2];
-      const partner = personas[(speakerIndex + 1) % 2];
-      const host = hosts[persona.key];
+      // Write and voice the NEXT turn while this one is playing.
+      pending = produceTurn();
+      pending.catch(() => {}); // surfaced when awaited on the next iteration
 
-      const line = await convo.nextLine(persona, partner);
-      console.log(`[show] ${persona.name}: ${line}`);
-      await host.post(config.discord.textChannelId, line);
-
-      let audio = null;
-      try {
-        audio = await speech.synthesize(line, voices[persona.key]);
-      } catch (err) {
-        console.warn(`[tts] ${err.message} — playing this line as text only`);
-      }
-
-      if (audio) {
-        await host.speak(audio);
+      if (turn.audio) {
+        await host.speak(turn.audio);
       } else {
         // Text-only mode: pause roughly as long as the line would take to read.
-        await sleep(Math.min(12_000, 1_000 + line.length * 45));
+        await sleep(Math.min(12_000, 1_000 + turn.line.length * 45));
       }
 
-      speakerIndex += 1;
       turnCount += 1;
       consecutiveErrors = 0;
 
@@ -110,6 +138,7 @@ async function main() {
 
       await sleep(config.show.pauseBetweenTurnsMs);
     } catch (err) {
+      pending = null; // never re-await a rejected (or superseded) turn
       // OpenAI 400s are deterministic (bad model/parameter combo) and will
       // never succeed on retry — crash loudly so the operator sees it.
       if (err?.status === 400) {

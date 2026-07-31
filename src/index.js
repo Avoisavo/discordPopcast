@@ -1,0 +1,134 @@
+import { Events } from 'discord.js';
+import { config } from './config.js';
+import { personas } from './personas.js';
+import { NewsDesk } from './news.js';
+import { Conversation } from './dialogue.js';
+import { Speech } from './tts.js';
+import { Host } from './host.js';
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const [personaA, personaB] = personas;
+const hostA = new Host(personaA, config.discord.tokenA, { withMessageContent: true });
+const hostB = new Host(personaB, config.discord.tokenB);
+
+function shutdown() {
+  console.log('[show] Shutting down…');
+  hostA.destroy();
+  hostB.destroy();
+  process.exit(0);
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+process.on('unhandledRejection', (err) => {
+  console.error('[show] Unhandled rejection:', err);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[show] Uncaught exception:', err);
+});
+
+async function main() {
+  const news = new NewsDesk(config.show.feeds);
+  const speech = new Speech(config.elevenlabs);
+  const convo = new Conversation(config.openai, config.show);
+
+  await Promise.all([hostA.login(), hostB.login()]);
+  await hostA.joinVoice(config.discord.guildId, config.discord.voiceChannelId);
+  await hostB.joinVoice(config.discord.guildId, config.discord.voiceChannelId);
+
+  // Listeners can steer the show: !topic <anything> (handled by bot A only).
+  hostA.client.on(Events.MessageCreate, async (message) => {
+    if (message.author.bot) return;
+    if (!message.content.startsWith('!topic ')) return;
+    const topic = message.content.slice('!topic '.length).trim();
+    if (!topic) return;
+    news.suggest(topic.slice(0, 300), message.author.username);
+    await message.react('🎙️').catch(() => {});
+    console.log(`[show] Listener topic queued: ${topic}`);
+  });
+
+  await news.refresh();
+  setInterval(
+    () => news.refresh().catch((err) => console.warn(`[news] refresh failed: ${err.message}`)),
+    config.show.feedRefreshMs,
+  );
+
+  await hostA.post(
+    config.discord.textChannelId,
+    `🔴 **The Popcast is live.** ${personaA.name} and ${personaB.name} are on air 24/7 in <#${config.discord.voiceChannelId}>. Steer the show anytime with \`!topic <your topic>\`.`,
+  );
+
+  const voices = { A: config.elevenlabs.voiceA, B: config.elevenlabs.voiceB };
+  const hosts = { A: hostA, B: hostB };
+
+  let speakerIndex = 0;
+  let turnCount = 0;
+  let consecutiveErrors = 0;
+
+  for (;;) {
+    try {
+      if (!convo.topic || convo.turnsOnTopic >= config.show.turnsPerTopic) {
+        const topic = news.next();
+        convo.setTopic(topic);
+        console.log(`[show] New topic: ${topic.title} (${topic.source})`);
+      }
+
+      const persona = personas[speakerIndex % 2];
+      const partner = personas[(speakerIndex + 1) % 2];
+      const host = hosts[persona.key];
+
+      const line = await convo.nextLine(persona, partner);
+      console.log(`[show] ${persona.name}: ${line}`);
+      await host.post(config.discord.textChannelId, line);
+
+      let audio = null;
+      try {
+        audio = await speech.synthesize(line, voices[persona.key]);
+      } catch (err) {
+        console.warn(`[tts] ${err.message} — playing this line as text only`);
+      }
+
+      if (audio) {
+        await host.speak(audio);
+      } else {
+        // Text-only mode: pause roughly as long as the line would take to read.
+        await sleep(Math.min(12_000, 1_000 + line.length * 45));
+      }
+
+      speakerIndex += 1;
+      turnCount += 1;
+      consecutiveErrors = 0;
+
+      if (turnCount % 25 === 0) {
+        const sub = await speech.subscription();
+        if (sub) {
+          console.log(
+            `[usage] ElevenLabs credits: ${sub.character_count}/${sub.character_limit} used this cycle (this session sent ${speech.charsUsed} chars to TTS)`,
+          );
+        }
+      }
+
+      await sleep(config.show.pauseBetweenTurnsMs);
+    } catch (err) {
+      // OpenAI 400s are deterministic (bad model/parameter combo) and will
+      // never succeed on retry — crash loudly so the operator sees it.
+      if (err?.status === 400) {
+        console.error(
+          `[show] Fatal: OpenAI rejected the request (${err.message}). Check OPENAI_MODEL and request parameters.`,
+        );
+        process.exit(1);
+      }
+      consecutiveErrors += 1;
+      const backoff = Math.min(5 * 60_000, 5_000 * 2 ** Math.min(consecutiveErrors, 6));
+      console.error(
+        `[show] Turn failed (${consecutiveErrors} in a row): ${err.message} — backing off ${Math.round(backoff / 1000)}s`,
+      );
+      await sleep(backoff);
+    }
+  }
+}
+
+main().catch((err) => {
+  console.error('[show] Fatal error during startup:', err);
+  process.exit(1);
+});

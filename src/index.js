@@ -1,4 +1,7 @@
 import { Events } from 'discord.js';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { personas } from './personas.js';
 import { NewsDesk } from './news.js';
@@ -7,6 +10,25 @@ import { Speech } from './tts.js';
 import { Host } from './host.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// script.md at the project root is performed verbatim on startup — lines
+// labelled **Emy:**/**Max:** go to host A, **Liam:**/**Nova:** to host B —
+// then the show continues generated, with the script in memory. Delete the
+// file to skip straight to the generated show.
+const SPEAKER_KEYS = { emy: 'A', max: 'A', liam: 'B', nova: 'B' };
+function loadScript() {
+  try {
+    const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+    return readFileSync(join(root, 'script.md'), 'utf8')
+      .split('\n')
+      .map((line) => line.match(/^\*\*([A-Za-z]+):\*\*\s*(.+)$/))
+      .filter(Boolean)
+      .map((m) => ({ key: SPEAKER_KEYS[m[1].toLowerCase()], text: m[2].trim() }))
+      .filter((line) => line.key && line.text);
+  } catch {
+    return [];
+  }
+}
 
 // Discord's voice handshake intermittently exceeds the 30s Ready window even
 // when nothing is misconfigured — retry a few times before giving up.
@@ -83,18 +105,90 @@ async function main() {
   // Short reactions the listening host drops mid-line, like a real co-host —
   // laughs included. Each (host, phrase) pair is synthesized once, then reused.
   const BACKCHANNELS = {
-    A: ['hahaha!', 'no way.', 'wait— [laughs]', 'bro.', 'okay okay.', "that's true."],
+    A: ['hahaha.', 'no way.', 'wait— [laughs]', 'bro.', 'okay okay.', "that's true."],
     B: ['ya ya hahaha.', '[laughs]', 'hahaha cannot.', 'mm-hmm.', 'so true.', 'aiyo.'],
   };
   const backchannelCache = new Map();
-  async function backchannelClip(key) {
-    const pool = BACKCHANNELS[key];
-    const phrase = pool[Math.floor(Math.random() * pool.length)];
-    const cacheKey = `${key}|${phrase}`;
-    if (!backchannelCache.has(cacheKey)) {
-      backchannelCache.set(cacheKey, await speech.synthesize(phrase, voices[key], speeds[key]));
+  // Laughs and murmurs render at a relaxed pace regardless of the host's
+  // talking speed — sped-up laughter sounds broken.
+  const BACKCHANNEL_SPEED = 0.95;
+  // Pre-warm every clip at startup: an uncached murmur takes v3 seconds to
+  // synthesize, so it used to land AFTER its line ended — colliding with the
+  // next speaker. Only cached clips ever play, so timing is exact.
+  (async () => {
+    for (const key of ['A', 'B']) {
+      for (const phrase of BACKCHANNELS[key]) {
+        const cacheKey = `${key}|${phrase}`;
+        if (backchannelCache.has(cacheKey)) continue;
+        try {
+          backchannelCache.set(cacheKey, await speech.synthesize(phrase, voices[key], BACKCHANNEL_SPEED));
+        } catch {}
+      }
     }
-    return backchannelCache.get(cacheKey);
+    console.log('[voice] backchannel clips warmed');
+  })();
+  function cachedBackchannel(key) {
+    const clips = BACKCHANNELS[key]
+      .map((phrase) => backchannelCache.get(`${key}|${phrase}`))
+      .filter(Boolean);
+    return clips.length ? clips[Math.floor(Math.random() * clips.length)] : null;
+  }
+  // Schedules a murmur strictly inside the first 60% of the line's estimated
+  // duration, so it can never straddle the hand-off to the next speaker.
+  function scheduleBackchannel(speakerKey, lineLength) {
+    if (Math.random() >= 0.5 || lineLength <= 70) return;
+    const partnerKey = speakerKey === 'A' ? 'B' : 'A';
+    const clip = cachedBackchannel(partnerKey);
+    if (!clip) return;
+    const estMs = lineLength * 60;
+    const delay = Math.min(estMs * 0.6, 800 + Math.random() * estMs * 0.5);
+    sleep(delay)
+      .then(() => hosts[partnerKey].interject(clip))
+      .catch(() => {});
+  }
+
+  // Perform script.md first if present — exact lines, right voices, next
+  // line synthesized while the current one plays — then fall through to the
+  // generated show with the script's tail in the hosts' memory.
+  const scriptLines = loadScript();
+  if (scriptLines.length) {
+    console.log(`[script] Performing script.md — ${scriptLines.length} lines`);
+    const synthLine = (line) =>
+      speech.synthesize(line.text, voices[line.key], speeds[line.key]).catch((err) => {
+        console.warn(`[tts] ${err.message} — playing this line as text only`);
+        return null;
+      });
+    // Synthesize a few lines ahead so short lines never wait on the API, and
+    // keep the inter-line gap near zero — real banter catches up instantly.
+    const audioPromises = new Array(scriptLines.length);
+    const ensureSynth = (idx) => {
+      if (idx < scriptLines.length && !audioPromises[idx]) audioPromises[idx] = synthLine(scriptLines[idx]);
+    };
+    for (let i = 0; i < scriptLines.length; i += 1) {
+      for (let j = i; j < i + 4; j += 1) ensureSynth(j);
+      const line = scriptLines[i];
+      const audio = await audioPromises[i];
+      const persona = line.key === 'A' ? personaA : personaB;
+      try {
+        console.log(`[script] ${persona.name}: ${line.text}`);
+        // Fire-and-forget: the transcript post must never delay the audio.
+        hosts[line.key].post(config.discord.textChannelId, line.text);
+        if (audio) {
+          const playback = hosts[line.key].speak(audio);
+          // Scripted lines get live murmurs from the listening host too.
+          scheduleBackchannel(line.key, line.text.length);
+          await playback;
+        } else {
+          await sleep(Math.min(12_000, 1_000 + line.text.length * 45));
+        }
+      } catch (err) {
+        console.warn(`[script] line failed (${err.message}) — continuing`);
+      }
+      convo.history.push({ speaker: persona.name, text: line.text });
+      await sleep(150);
+    }
+    convo.history = convo.history.slice(-40);
+    console.log('[script] Script finished — continuing with generated conversation');
   }
 
   let speakerIndex = 0;
@@ -124,33 +218,35 @@ async function main() {
     return { persona, line, audio };
   }
 
-  let pending = null;
+  // Two-deep production chain: while a line plays, the next is already done
+  // and the one after is being written. Generation runs continuously instead
+  // of restarting after each playback, so hand-offs never wait on the writers.
+  let next = null;
+  let after = null;
   for (;;) {
     try {
-      const turn = await (pending ?? produceTurn());
+      if (!next) {
+        next = produceTurn();
+        after = next.then(() => produceTurn());
+        next.catch(() => {});
+        after.catch(() => {});
+      }
+      const turn = await next;
+      next = after;
+      after = next.then(() => produceTurn());
+      next.catch(() => {});
+      after.catch(() => {});
+
       const host = hosts[turn.persona.key];
       console.log(`[show] ${turn.persona.name}: ${turn.line}`);
       // Audio tags are for the TTS engine; keep the transcript readable.
+      // Fire-and-forget: the transcript post must never delay the audio.
       const readable = turn.line.replace(/\[[^\]\n]{1,30}\]/g, ' ').replace(/\s+/g, ' ').trim();
-      await host.post(config.discord.textChannelId, readable);
-
-      // Write and voice the NEXT turn while this one is playing.
-      pending = produceTurn();
-      pending.catch(() => {}); // surfaced when awaited on the next iteration
+      host.post(config.discord.textChannelId, readable);
 
       if (turn.audio) {
         const playback = host.speak(turn.audio);
-        // The listening host occasionally murmurs agreement partway through —
-        // capped well before the line's estimated end so it never collides
-        // with their own next line.
-        if (Math.random() < 0.5 && turn.line.length > 80) {
-          const partnerKey = turn.persona.key === 'A' ? 'B' : 'A';
-          const delay = 1_500 + Math.random() * Math.min(6_000, turn.line.length * 25);
-          sleep(delay)
-            .then(() => backchannelClip(partnerKey))
-            .then((clip) => (clip ? hosts[partnerKey].interject(clip) : null))
-            .catch(() => {}); // best-effort — never disturb the main line
-        }
+        scheduleBackchannel(turn.persona.key, turn.line.length);
         await playback;
       } else {
         // Text-only mode: pause roughly as long as the line would take to read.
@@ -171,7 +267,8 @@ async function main() {
 
       await sleep(config.show.pauseBetweenTurnsMs);
     } catch (err) {
-      pending = null; // never re-await a rejected (or superseded) turn
+      next = null; // never re-await a rejected (or superseded) turn
+      after = null;
       // OpenAI 400s are deterministic (bad model/parameter combo) and will
       // never succeed on retry — crash loudly so the operator sees it.
       if (err?.status === 400) {

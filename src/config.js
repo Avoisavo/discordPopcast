@@ -55,7 +55,7 @@ export const config = {
     speedB: num(process.env.ELEVENLABS_SPEED_B, 1.15),
   },
   show: {
-    pauseBetweenTurnsMs: int(envExcept('PAUSE_BETWEEN_TURNS_MS', '4000'), 800),
+    pauseBetweenTurnsMs: int(envExcept('PAUSE_BETWEEN_TURNS_MS', '4000'), 300),
     // One topic cycle = one episode (cold open → stories → wind-down → sign-off).
     turnsPerTopic: int(envExcept('TURNS_PER_TOPIC', '10'), 40),
     maxLineChars: int(process.env.MAX_LINE_CHARS, 320),

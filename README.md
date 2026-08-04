@@ -66,6 +66,7 @@ The bots leave the voice channel the moment the process dies.
 
 ## Steering the show
 
+- [script.md](script.md) at the project root → **script mode**: on every startup the hosts perform it verbatim, line by line (`**Emy:**`/`**Max:**` → bot A, `**Liam:**`/`**Nova:**` → bot B), then continue with the generated show. Delete the file to skip straight to generated conversation.
 - `!topic anything you want` in the transcript channel → jumps the queue as the next topic.
 - [topics.md](topics.md) at the project root → **theme mode**: the show rotates these topics (in random order) and ignores RSS entirely. Edit the list to change the show's theme; delete the file to go back to news mode.
 - `NEWS_FEEDS` in `.env` → any comma-separated RSS feeds (default: BBC World, The Verge, Ars Technica, Variety). Only used when `topics.md` doesn't exist.
